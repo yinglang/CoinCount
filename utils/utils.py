@@ -40,6 +40,31 @@ def cal_mean_std(path_root):
         else:
             imgs = np.concatenate((imgs, img), axis=0)
     return np.mean(imgs, axis=0), np.std(imgs, axis=0)
+
+
+def turn_SDL_to_SDL2(anno_root, image_root, out_anno_root, ext=".jpg"):
+    """
+    turn SDL format annotation to SDL2 annotation
+    SDL format every line is:
+        x1 y1 x2 y2 x3 y3 x4 y4 angle label
+    SDL2 format every line is:
+        xmin \t ymin \t xmax \t ymax \t angle \t label
+    """
+    mkdir_if_not_exist(out_anno_root)
+    for anno_name in os.listdir(anno_root):
+        anno_path = os.path.join(anno_root, anno_name)
+        image_path = os.path.join(image_root, anno_name[:-4] + ext)
+        info = get_info_from_annotaions_SDL(anno_path, image_path, normalize=True)
+        boxes, angles, labels = info["boxes"], info["angles"], info["labels"]
+        
+        f = open(out_anno_root + "/" + anno_name, 'w')
+        for i in range(len(boxes)):
+            box, angle, label = boxes[i], angles[i], labels[i]
+            box = [str(b) for b in box]
+            line = "\t".join(box) + "\t" + str(angle) + "\t" + str(label) + "\n"
+            f.write(line)
+        f.close()
+        
         
 """
 3. data prepared
@@ -96,10 +121,10 @@ def get_info_from_annotaions_VOC(annopath, normalize=True):
     info = {"boxes": boxes, "labels": labels, "w": w, "h": h}
     return info
 
-def get_info_from_annotaions_SDL(annopath, imgpath, normalize=True):
+def get_info_from_annotaions_SDL(annopath, imgpath=None, normalize=True):
     """
     args:
-        annopath: VOC format annotaion file path
+        annopath: VOC format annotaion file path.
         imgpath: the image path to annotaion file.
         normalzie: whether boxes is normalzie to [0, 1] (/w, /h)
     
@@ -125,7 +150,13 @@ def get_info_from_annotaions_SDL(annopath, imgpath, normalize=True):
                 new_label.append(l)
         return new_label
     
-    w, h = get_image_wh(imgpath)
+    if imgpath is None and normalize:
+        raise ValueError("when set normalize to True, imgpath must be specified")
+    
+    if imgpath is not None:
+        w, h = get_image_wh(imgpath)
+    else:
+        w, h = None, None
     
     windows = open(annopath).readlines()
     boxes = []
@@ -133,7 +164,7 @@ def get_info_from_annotaions_SDL(annopath, imgpath, normalize=True):
     angles = []
     for label in windows:
         label = split_label(label)
-        label = map(lambda x: float(x), label[:-1])
+        label = map(lambda x: float(x), label[:])
         x1, y1, x2, y2, x3,y3, x4, y4 = label[:8]
         xmin = min([x1, x2, x3, x4])
         ymin = min([y1, y2, y3, y4])
@@ -295,6 +326,10 @@ def show_images(images, labels=None, rgb_mean=np.array([0, 0, 0]),
             if N * i + j < images.shape[0]:
                 image = (images[N * i + j] / 255).clip(0, 1)
                 figs[i][j].imshow(image)
+                
+                figs[i][j].axes.get_xaxis().set_visible(False)
+                figs[i][j].axes.get_yaxis().set_visible(False)
+                
                 if labels is not None:
                     label = labels[N * i + j]
                     for l in label:
@@ -305,9 +340,6 @@ def show_images(images, labels=None, rgb_mean=np.array([0, 0, 0]),
                         if show_text:
                             figs[i][j].text(l[1], l[2], str(int(l[0])), 
                                             bbox=dict(facecolor=(1, 1, 1), alpha=0.5), fontsize=fontsize, color=(0, 0, 0))
-
-                    figs[i][j].axes.get_xaxis().set_visible(False)
-                    figs[i][j].axes.get_yaxis().set_visible(False)
             else:
                 figs[i][j].set_visible(False)
     plt.show()
@@ -329,7 +361,7 @@ def show_det_result(im, out, threshold=0.5, class_names=None, colors = ['blue', 
     im = try_asnumpy(im)
     out = try_asnumpy(out)
     
-    plt.imshow(im)
+    plt.imshow((im / 255).clip(0, 1))
     for row in out:
         class_id, score = int(row[0]), row[1]
         if class_id < 0 or score < threshold:  # class_id < 0 is background rect
@@ -345,3 +377,63 @@ def show_det_result(im, out, threshold=0.5, class_names=None, colors = ['blue', 
                        bbox=dict(facecolor=color, alpha=0.5),
                        fontsize=10, color='white')
     plt.show()
+
+def show_det_results(images, outs, threshold=0.5, class_names=None, 
+                     colors = ['blue', 'green', 'red', 'black', 'magenta'], MN=None, figsize=(8, 4),
+                     linewidth=1, show_text=True, fontsize=5):
+    """
+    im: image data, numpy.array or ndarray
+    out: detection result, numpy.array or ndarray
+    theshold: score threshold
+    class_name: class or labels name
+    MN: sub figure's row and col number
+    """
+    images = try_asnumpy(images)
+    outs = try_asnumpy(outs)
+    
+    if MN is None:
+        M, N = (images.shape[0] + 4) / 5, 5
+    else:
+        M, N = MN
+    _, figs = plt.subplots(M, N, figsize=figsize)
+    
+    for i in range(M):
+        for j in range(N):
+            if N * i + j < images.shape[0]:
+                image = (images[N * i + j] / 255).clip(0, 1)
+                figs[i][j].imshow(image)
+                figs[i][j].axes.get_xaxis().set_visible(False)
+                figs[i][j].axes.get_yaxis().set_visible(False)
+                
+                if outs is None: continue
+                out = outs[N * i + j]
+                for row in out:
+                    class_id, score = int(row[0]), row[1]
+                    if class_id < 0 or score < threshold:  # class_id < 0 is background rect
+                        continue
+                    color = colors[class_id%len(colors)]
+                    box = row[2:6] * np.array([image.shape[0],image.shape[1]]*2)
+                    rect = box_to_rect(box, color, linewidth)
+                    figs[i][j].add_patch(rect)
+                    if show_text:
+                        text = class_names[class_id] if class_names else "class " + str(class_id)
+                        figs[i][j].text(box[0], box[1],
+                                       '{:s} {:.2f}'.format(text, score),
+                                       bbox=dict(facecolor=color, alpha=0.5),
+                                       fontsize=10, color='white')
+                    
+            else:
+                figs[i][j].set_visible(False)
+    plt.show()
+    
+"""
+5. data analysis
+"""
+def get_all_boxes_from_annotations_SDL2(anno_root):
+    boxes = []
+    for anno_name in os.listdir(anno_root):
+        anno_path = os.path.join(anno_root, anno_name)
+        for line in open(anno_path).readlines():
+            items = [float(item) for item in line.split('\t')]
+            boxes.append(items[:4])
+    return boxes
