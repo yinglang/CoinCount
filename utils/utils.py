@@ -14,7 +14,7 @@ def mkdir_if_not_exist(dirs):
 from PIL import Image
 import os
 import numpy as np
-def resize_imageset(image_root, out_dir, resize, resample=Image.BOX):
+def resize_imageset(image_root, out_dir, resize, resample=Image.BILINEAR):
     for imgname in os.listdir(image_root):
         imgpath = image_root + "/" + imgname
         img = Image.open(imgpath)
