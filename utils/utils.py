@@ -1,3 +1,4 @@
+# coding=utf-8
 import os
 
 """
@@ -298,7 +299,7 @@ def box_to_rect(box, color, linewidth=1):
     return plt.Rectangle((box[0], box[1]), box[2]-box[0], box[3]-box[1], 
                   fill=False, edgecolor=color, linewidth=linewidth)
 
-def show_images(images, labels=None, rgb_mean=np.array([0, 0, 0]), 
+def show_images(images, labels=None, rgb_mean=np.array([0, 0, 0]), std=np.array([1, 1, 1]),
                 MN=None, color=(0, 1, 0), linewidth=1, figsize=(8, 4), show_text=False, fontsize=5):
     """
     advise to set dpi to 120
@@ -319,7 +320,7 @@ def show_images(images, labels=None, rgb_mean=np.array([0, 0, 0]),
         M, N = MN
     _, figs = plt.subplots(M, N, figsize=figsize)
     
-    images = images.transpose((0, 2, 3, 1)) + rgb_mean
+    images = (images.transpose((0, 2, 3, 1)) * std) + rgb_mean
     h, w = images.shape[1], images.shape[2]
     for i in range(M):
         for j in range(N):
@@ -437,3 +438,240 @@ def get_all_boxes_from_annotations_SDL2(anno_root):
             items = [float(item) for item in line.split('\t')]
             boxes.append(items[:4])
     return boxes
+
+"""
+6. evaluate
+"""
+import numpy as np
+"""
+attention: 
+    1. use numpy, note type, v(int) = v(float), will cilp value
+    2. use numpy, note copy, use copy when need deep copy to avoid shallow copy
+"""
+def IOU_1v1(box1, box2):
+    """
+    box=[xmin, ymin, xmax, ymax]
+    """
+    box = box1.copy()
+    box[0] = max([box1[0], box2[0]])
+    box[1] = max([box1[1], box2[1]])
+    box[2] = min([box1[2], box2[2]])
+    box[3] = min([box1[3], box2[3]])
+    if box[0] >= box[2] or box[1] >= box[3]:
+        return 0.
+    area = (box[2] - box[0]) * (box[3] -  box[1])
+    area1 = (box1[2] - box1[0]) * (box1[3] -  box1[1])
+    area2 = (box2[2] - box2[0]) * (box2[3] -  box2[1])
+    return float(area) / (area1 + area2 - area)
+
+def IOU_NvN(boxes1, boxes2):
+    """
+        boxes1: numpy array, shape=(N, 4)
+        boxes2: numpy array, shape=(N, 4)
+    return 
+        IOU: numpy array, shape=(N,)
+    """
+    def Area(boxes):
+        return (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+    boxes1 = boxes1.astype('float64')
+    boxes2 = boxes2.astype('float64')
+    boxes = np.zeros(shape=boxes1.shape)
+    boxes[:, 0] = np.max([boxes1[:, 0], boxes2[:, 0]], axis=0)
+    boxes[:, 1] = np.max([boxes1[:, 1], boxes2[:, 1]], axis=0)
+    boxes[:, 2] = np.min([boxes1[:, 2], boxes2[:, 2]], axis=0)
+    boxes[:, 3] = np.min([boxes1[:, 3], boxes2[:, 3]], axis=0)
+    area = Area(boxes)
+    area[boxes[:, 0] >= boxes[:, 2]] = 0
+    area[boxes[:, 1] >= boxes[:, 3]] = 0
+    area1 = Area(boxes1)
+    area2 = Area(boxes2)
+    return area / (area1 + area2 - area)
+
+def IOU_1vN(box1, boxes2):
+    """
+    box=[xmin, ymin, xmax, ymax]
+    """
+    boxes1 = np.tile(box1, (boxes2.shape[0], 1))
+    return IOU_NvN(boxes1, boxes2)
+
+def IOU(box1, box2):
+    assert box1.shape[-1] == 4 and box2.shape[-1] == 4
+    assert len(box1.shape) <= 2 and len(box2.shape) <= 2
+    if len(box1.shape) == 1:
+        if len(box2.shape) == 1:  # 1 v 1
+            return IOU_1v1(box1, box2)
+        else:                     # 1 v N
+            return IOU_1vN(box1, box2)
+    else:
+        if len(box2.shape) == 1:  # N v 1
+            return IOU_1vN(box2, box1)
+        else:                     # N v N
+            return IOU_NvN(box1, box2)
+
+
+# def cal_pred_scores(outs, labels, overlap_threshold=0.01):
+#     # compute tp_score, num_pred, num_gt
+#     tp_scores, fp_scores, num_pred, num_gt = [],[], 0., 0.
+#     for n in xrange(outs.shape[0]): # every image
+#         out = outs[n]
+#         out = out[out[:, 0] >= 0]
+#         out = np.array(sorted(out, key=lambda row: -row[1])) # sort out by score
+#         tmp_label = labels[n]
+#         label = tmp_label[tmp_label[:, 0] >= 0]
+
+#         num_pred += out.shape[0]
+#         num_gt += label.shape[0]
+
+#         gt_flags = np.array([True] * label.shape[0])
+#         for i, pred_box in enumerate(out):       # every pred box
+#             if np.sum(gt_flags) <= 0: break
+#             overlaps = IOU(pred_box[2:], label[:, 1:])
+#             maxi = np.argmax(overlaps)
+#             max_overlap = overlaps[maxi]
+#             if max_overlap >= overlap_threshold and gt_flags[maxi]:
+#                 gt_flags[maxi] = False
+#                 tp_scores.append(pred_box[1])
+#             else:
+#                 fp_scores.append(pred_box[1])
+#         fp_scores.extend(list(out[i:, 1]))
+#     tp_scores = np.array(tp_scores)
+#     fp_scores = np.array(fp_scores)
+#     return tp_scores, fp_scores, num_pred, num_gt
+
+def cal_pred_scores_pair(outs, labels, overlap_threshold=0.01):
+    # compute tp_score, num_pred, num_gt
+    scores, is_tp, num_pred, num_gt = [], [], 0., 0.
+    for n in xrange(outs.shape[0]): # every image
+        out = outs[n]
+        out = out[out[:, 0] >= 0]
+        out = np.array(sorted(out, key=lambda row: -row[1])) # sort out by score
+        tmp_label = labels[n]
+        label = tmp_label[tmp_label[:, 0] >= 0]
+
+        num_pred += out.shape[0]
+        num_gt += label.shape[0]
+
+        gt_flags = np.array([True] * label.shape[0])
+        for i, pred_box in enumerate(out):       # every pred box
+            if np.sum(gt_flags) <= 0: break
+            overlaps = IOU(pred_box[2:], label[:, 1:])
+            maxi = np.argmax(overlaps)
+            max_overlap = overlaps[maxi]
+            if max_overlap >= overlap_threshold and gt_flags[maxi]:
+                gt_flags[maxi] = False
+                scores.append(pred_box[1])
+                is_tp.append(True)
+            else:
+                scores.append(pred_box[1])
+                is_tp.append(False)
+        scores.extend(list(out[i:, 1]))
+        is_tp.extend([False] * out[i:].shape[0])
+        
+    scores = np.array(scores)
+    is_tp = np.array(is_tp)
+    return scores, is_tp, num_pred, num_gt
+
+def cal_scores_recall_prec(outs, labels, overlap_threshold=0.01, verbose=False):
+    """
+        scores 是升序排列的所有box的score集合
+        tp[i] 表示使用score阈值为scores[i]时的true positive的数量
+        fp[i] 表示使用score阈值为scores[i]时的fp positive的数量
+    """
+    scores, is_tp, num_pred, num_gt = cal_pred_scores_pair(outs, labels, overlap_threshold)
+    if verbose:
+        print len(scores), len(is_tp), int(num_pred), int(num_gt)
+    
+    idx = np.argsort(scores)
+    scores = scores[idx]
+    is_tp = is_tp[idx]
+    
+    tp = np.zeros(shape=is_tp.shape)
+    fp = np.zeros(shape=is_tp.shape)
+    N = is_tp.shape[0]
+    tp[N-1] = is_tp[N-1]
+    fp[N-1] = (not is_tp[N-1])
+    for i in range(N-2, -1, -1):
+        # score_th = scores[i]
+        tp[i] = tp[i+1]
+        fp[i] = fp[i+1]
+        if is_tp[i]:
+            tp[i] += 1
+        else:
+            fp[i] += 1
+            
+    prec = tp / (tp + fp)
+    recall = tp / num_gt
+    return scores, recall, prec
+
+
+EPS = 1e-10
+def evaluate_MAP(outs, labels, overlap_threshold=0.01, ap_version="11points", verbose=False):
+    outs = outs.asnumpy()   # share memory with outs's ndarray
+    labels = labels.asnumpy()
+    
+    # tp_scores, fp_scores, num_pred, num_gt = cal_pred_scores(outs, labels, overlap_threshold)
+        # compute 11 point AP
+#     AP = 0.
+#     for i in range(11): # 0-1.0
+#         score_th = i / 10.0
+#         tp = np.sum(tp_scores > score_th)
+#         fp = np.sum(fp_scores > score_th)
+#         print tp, fp
+#         recall = tp / (tp + fp + EPS)
+#         prec = tp / num_pred
+#         AP += prec
+#     AP /= 11
+#     if verbose:
+#         print tp_scores.shape[0], fp_scores.shape[0], int(num_pred), int(num_gt)
+#     return AP
+
+    scores, recall, prec = cal_scores_recall_prec(outs, labels, overlap_threshold, verbose)
+    
+    if ap_version == "11points":
+        start_idx = 0
+        AP = 0.
+        max_prec = 0
+        recall_th = 1.0
+        for i in range(recall.shape[0]):
+            if recall[i] < recall_th:
+                AP += max_prec
+                recall_th -= 0.1
+                if recall_th < 0: break
+            if max_prec < prec[i]:
+                max_prec = prec[i]
+                    
+#         for j in range(10, -1, -1):
+#             for i in range(start_idx, N):
+#                 if recall[i] >= j / 10.0:
+#                     if max_prec < prec[i]:
+#                         max_prec = prec[i]
+#                 else:
+#                     AP += max_prec
+#                     start_idx = i
+#                     break
+        return AP / 11
+#         for i in range(N-1, -1, -1):
+#             if recall[i] > recll[]
+    elif ap_version.lower() == "integral":  # recall 算出来是降序的，因为scores升序，score越大，recall越小
+        delta_recall = recall[:-1] - recall[1:]
+        print prec[0], recall[0]
+        return np.sum(delta_recall * prec[1:] + prec[-1] * recall[-1])
+
+def draw_ROC(outs, labels, overlap_threshold=0.01, verbose=False):
+    outs = outs.asnumpy()   # share memory with outs's ndarray
+    labels = labels.asnumpy()
+    scores, recall, prec = cal_scores_recall_prec(outs, labels, overlap_threshold)
+    plt.plot(recall,prec, label="recall prec")
+    plt.plot(recall, scores, label="recall score")
+    plt.legend(loc="upper right")
+    plt.show()
+    
+def find_best_score_th(outs, labels, overlap_threshold=0.01):
+    scores, recall, prec = cal_scores_recall_prec(outs, labels, overlap_threshold)
+    max_area = 0
+    max_i = -1
+    for i in range(recall.shape[0]):
+        if max_area < recall[i] * prec[i]:
+            max_area = recall[i] * prec[i]
+            max_i = i
+    return scores[i]
