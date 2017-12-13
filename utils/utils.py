@@ -552,6 +552,7 @@ def cal_pred_scores_pair(outs, labels, overlap_threshold=0.01):
         num_gt += label.shape[0]
 
         gt_flags = np.array([True] * label.shape[0])
+        i = 0
         for i, pred_box in enumerate(out):       # every pred box
             if np.sum(gt_flags) <= 0: break
             overlaps = IOU(pred_box[2:], label[:, 1:])
