@@ -1,4 +1,7 @@
 dataset
-.ipynb_checkpoints
 models
+.ipynb_checkpoints
+data_prepare/.ipynb_checkpoints
+model_train/.ipynb_checkpoints
+utils/.ipynb_checkpoints
 
