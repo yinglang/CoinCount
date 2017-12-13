@@ -1,14 +1,18 @@
-### 目录结构
-#### [一、train各个脚本说明](#1)
-#### [二、各个阶段脚本的检测效果](#2)
-#### [三、整个框架的基本流程](#3)
-#### [四、训练时候精度提升的几个关键步骤](#4)
-#### [五、其他脚本](#5)
+# 目录结构
+### [一、train各个脚本说明](#1)
+### [二、各个阶段脚本的检测效果](#2)
+### [三、整个框架的基本流程](#3)
+### [四、训练时候精度提升的几个关键步骤](#4)
+#### [1. 模型充分训练（使用精度曲线炼丹）](#4.1)
+#### [2. complex model and bigger input](#4.2)
+#### [3. 数据和模型尺度问题（train 6）](#4.3)
+#### [4. 根据目测的检测结果，分析检测失败的样本，制定策略](#4.4)
+### [五、其他脚本](#5)
 
 --------------------------------------------------------------------------------------------------------
 
 
-### <h2 id="1">一、train各个脚本说明</h2>
+## <h2 id="1">一、train各个脚本说明</h2>
 
 框架code file | 说明
 --- | ---
@@ -20,25 +24,25 @@ train5 | bigger input，将输入调整为512x512，对应的VGG11bn选前28层(
 train6 | 为了解决train5检测结果的尺度问题，采用了来跟你个策略：<br/>1.数据增强中添加多尺度（rand_pad+rand_crop）<br/>2.根据data_prepare/data_analysis.ipynb脚本分析数据中框的大小分布调整模型中的sizes参数<br/>两者结合最后在valid set上的AP值提升到了0.9048！！！！！！<br/>box预测的误差也大大减小了<br/>只是为了查看上面的策略是否有效，所以为了网络训练更快，这里使用256x256的输入图片(vgg11bn前21层)，对比前面256x256的效果<br/>
 train7 | 输入为512x512(vgg11bn前28层)，同样收敛的更快，<br/>但是valid AP值并没有太大提升，而train AP获得了提升，<br/>获得的ROC曲线几近完美，目测效果也有很大提升,但同时速度满了很多<br/>
 
-### 二、各个阶段脚本的检测效果
-#### train1 (origin toy net framework)
+## <h2 id="2">二、各个阶段脚本的检测效果</h2>
+### train1 (origin toy net framework)
 ![](../_image/train1_very_bad_result.png)
-#### train2 (more complex body net)
+### train2 (more complex body net)
 ![](../_image/train2.png)
-#### train3 (add right acc standard)
+### train3 (add right acc standard)
 ![](../_image/train3.png)
-#### train4 (adapt lr policy)
+### train4 (adapt lr policy)
 ![](../_image/train4.png)
-#### train5 (bigger input image)
+### train5 (bigger input image)
 分析认为是尺度问题，也可能是色调问题
 ![](../_image/small_obj_not_good_train5.png)
-#### train6 (scale data argument and data adaptive sizes_list choose)
+### train6 (scale data argument and data adaptive sizes_list choose)
 ![](../_image/train6.png)
-#### train7 (train6 + bigger input)
+### train7 (train6 + bigger input)
 ![](../_image/train7.png)
 ![](../_image/train7_ROC.png)
 
-### 三、整个框架的基本流程
+## <h2 id="3">三、整个框架的基本流程</h2>
 1. 数据预处理
 2. 数据加载、数据增强、数据可视化
 3. 模型定义
@@ -46,7 +50,7 @@ train7 | 输入为512x512(vgg11bn前28层)，同样收敛的更快，<br/>但是
 5. 模型训练
 6. 结果可视化
 
-#### 流程中用到的工具代码
+### 流程中用到的工具代码
 ```
 1. generally tool
     mkdir_if_not_exist
@@ -62,8 +66,8 @@ train7 | 输入为512x512(vgg11bn前28层)，同样收敛的更快，<br/>但是
     IOU、cal_scores_recall_prec、evaluate_MAP、draw_ROC、find_best_score_th
 ```
 
-### 四、训练时候精度提升的几个关键步骤
-#### 1. 模型充分训练（使用精度曲线炼丹）
+## <h2 id="4">四、训练时候精度提升的几个关键步骤 </h2>
+### <h3 id="4.1">1. 模型充分训练（使用精度曲线炼丹）</h3>
 一次大提升来自于对模型的充分训练，达到较好的收敛效果（炼丹，主要是调整迭代的epoch次数和sgd lr策略）,这需要一个能正确反映训练效果的精度标准，可以通过精度曲线的特点，辅助调节<br/>
 举个例子，比如下图中我使用base_lr=0.3, lr_decay=0.1, 每隔50个epoch decay一次，AP曲线如下<br/>
 ![](../_image/train_过早的decay.png)<br/>
@@ -95,14 +99,14 @@ epoch 98 ('accuracy', 0.9832422544697527) ('mae', 0.014350553043186665) 0.482802
 epoch 99 ('accuracy', 0.9827447648787656) ('mae', 0.014538686412076155) 0.474829 0.0383601598442
 ```
 
-#### 2. complex model and bigger input
+### <h3 id="4.2">2. complex model and bigger input</h3>
 对于检测任务，更大的输入往往带来更多的信息，往往带来效果的提升（本实验中没有带来AP提升，但是带来了收敛速度和目测效果的提升）<br/>
 
 之前关于数据增强的日志中已经说明了过拟合和拟合程度不足的表现（train acc和valid acc的关系）和他们的解决方法，其中过拟合常常使用wd,dropuout等模型策略，但更有力的其实还是数据上做功夫(新的数据，更强的数据增强)，而拟合策拟合程度不足可以通过使用更复杂的模型来解决<br/>
 
 通常的，只要**数据做的足够好**，模型和参数使用的合理（**pretrain,模型输入、需要的模型输出等参数一致...**），越复杂的模型效果基本都是越好的。<br/>
 
-#### 3. 数据和模型尺度问题（train 6）
+### <h3 id="4.3">3. 数据和模型尺度问题（train 6）</h3>
 为了解决尺度问题，我们采用了两个策略，强力数据增强（尤其是尺度方面），下面是增强后的示例图片：<br/>
 ![](../_image/data_argument.png)<br/>
 统计了数据中检测框的大小（统计脚本在../data_prepare/data_analysis.ipynb下）<br/>
@@ -124,10 +128,10 @@ sizes_list = [[ 0.10416667 ,0.17361111], [0.18624024, 0.34354575], [.37,.619],
 我也尝试过使得第一个预测层不是在Pooling 3次，而是pooling 4次，这样其实预测的anchorbox减少了，每个anchorbox对应的感受野增大了，但是对于AP值的变化也不是很明显<br/>
 
 
-#### 4. 根据目测的检测结果，分析检测失败的样本，制定策略
+### <h3 id="4.4">4. 根据目测的检测结果，分析检测失败的样本，制定策略</h3>
 
-### 五.、其他脚本
-#### model_analysis
+## 五.、其他脚本
+### model_analysis
 由于默认的SSD各个预测层的输入的大小如下所示
 ```
 predict scale 0 (8L, 512L, 32L, 32L) with (1L, 4096L, 4L) anchors
@@ -140,7 +144,7 @@ predict scale 4 (8L, 128L, 1L, 1L) with (1L, 4L, 4L) anchors
 ```
 所以选择body网络时候，最好保证输出也是32x32，因此网络输入前使用该脚本确定应该导入前几层，使得body网输出为32x32
 
-#### evaluate
+### evaluate
 为了实现mxnet没有的计算AP值和绘制ROC曲线的代码，而写的测试
 
 #### TODO
