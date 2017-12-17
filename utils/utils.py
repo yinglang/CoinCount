@@ -565,7 +565,8 @@ def cal_pred_scores_pair(outs, labels, overlap_threshold=0.01):
             else:
                 scores.append(pred_box[1])
                 is_tp.append(False)
-        scores.extend(list(out[i:, 1]))
+        if i < out.shape[0]:
+            scores.extend(list(out[i:, 1]))
         is_tp.extend([False] * out[i:].shape[0])
         
     scores = np.array(scores)
@@ -658,14 +659,15 @@ def evaluate_MAP(outs, labels, overlap_threshold=0.01, ap_version="11points", ve
         print prec[0], recall[0]
         return np.sum(delta_recall * prec[1:] + prec[-1] * recall[-1])
 
-def draw_ROC(outs, labels, overlap_threshold=0.01, verbose=False):
+def draw_ROC(outs, labels, overlap_threshold=0.01, verbose=False, show=True, color='r', label_suffix=""):
     outs = outs.asnumpy()   # share memory with outs's ndarray
     labels = labels.asnumpy()
     scores, recall, prec = cal_scores_recall_prec(outs, labels, overlap_threshold)
-    plt.plot(recall,prec, label="recall prec")
-    plt.plot(recall, scores, label="recall score")
+    plt.plot(recall,prec, '-', label="recall prec"+label_suffix, color=color)
+    plt.plot(recall, scores, '--', label="recall score"+label_suffix, color=color)
     plt.legend(loc="upper right")
-    plt.show()
+    if show:
+        plt.show()
     
 def find_best_score_th(outs, labels, overlap_threshold=0.01):
     scores, recall, prec = cal_scores_recall_prec(outs, labels, overlap_threshold)
