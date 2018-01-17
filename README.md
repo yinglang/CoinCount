@@ -5,9 +5,9 @@
 这是一个针对中国硬币（五角和一元的）检测的小程序，使用的框架是[mxnet gluon](http://zh.gluon.ai/chapter_preface/install.html)，使用的检测框架为SSD，实验平台是jupyter notebook（可以使用pip install jupyter安装）。
 
 ## 运行测试
-1. 在项目根目录下创建 models 目录，下载训练好的模型参数文件sdl_coin_vgg11bn28_512x512_data_sizes.param到 models 目录下，模型下载
+1. 在项目根目录下创建 models 目录，下载训练好的模型参数文件到 models 目录下，并重命名为sdl_coin_vgg11bn28_512x512_data_sizes.param，模型下载
 ```
-链接: https://pan.baidu.com/s/1bSrzVg 密码: pfjn
+链接: https://pan.baidu.com/s/1smD8nk5 密码: xr9s
 ```
 如果需要的话也可以下载本工程的全部模型参数文件（一般不需要），下载链接在
 ```
